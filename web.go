@@ -9,6 +9,12 @@ import (
 	"os"
 )
 
+// SendFile answers the request by sending a file.
+// If the file cannot be found or opened it returns an appropriate HTTPError.
+// Otherwise it calls http.ServeContent() internally.
+// Note that the filename is not sanitized in any way and passed directly to os.Open().
+// However, if you are using http.ServeMux, it should have already sanitized
+// the URL request path, so you can safely construct the filename from that.
 func SendFile(w http.ResponseWriter, r *http.Request, filename string) error {
 	file, err := os.Open(filename)
 	if err != nil {
