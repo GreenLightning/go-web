@@ -41,13 +41,13 @@ func NewRendererWithFunctions(directory string, functions FuncMap) *Renderer {
 func (r *Renderer) WatchTemplateDirectory() {
 	watcher, err := fsnotify.NewWatcher() // @Leak: Close watcher.
 	if err != nil {
-		log.Println("[web][render][warning] failed to create template watcher:", err)
+		log.Println("[renderer] warning: failed to create template watcher:", err)
 		return
 	}
 
 	err = watcher.Add(r.directory)
 	if err != nil {
-		log.Println("[web][render][warning] failed to watch template directory:", err)
+		log.Println("[renderer] warning: failed to watch template directory:", err)
 		return
 	}
 
@@ -58,15 +58,15 @@ func (r *Renderer) WatchTemplateDirectory() {
 				if event.Op&fsnotify.Write != 0 {
 					updated, err := r.base.ParseFiles(event.Name)
 					if err != nil {
-						log.Printf("[web][render][warning] failed to reload template file (%s): %v", event.Name, err)
+						log.Printf("[renderer] warning: failed to reload template file (%s): %v", event.Name, err)
 					} else {
 						r.base = updated
 						r.templates = template.Must(updated.Clone())
-						log.Println("[web][render][info] updated template file:", event.Name)
+						log.Println("[renderer] info: updated template file:", event.Name)
 					}
 				}
 			case err := <-watcher.Errors:
-				log.Println("[web][render][warning] template watcher error:", err)
+				log.Println("[renderer] warning: template watcher error:", err)
 			}
 		}
 	}()

@@ -77,7 +77,7 @@ func SendBLOB(w http.ResponseWriter, r *http.Request, statusCode int, contentTyp
 	_, err := w.Write(data)
 	if err != nil {
 		// Do not return this error, as we have already committed the response.
-		log.Println("[web][error] failed to write data:", err)
+		log.Println("[web] error: failed to write data:", err)
 	}
 	return nil
 }
