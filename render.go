@@ -1,15 +1,19 @@
 package web
 
 import (
-	"html/template"
 	"io"
+	"io/ioutil"
 	"log"
-	"strings"
+	"os"
+	"path/filepath"
+
+	htmltemplate "html/template"
+	texttemplate "text/template"
 
 	"github.com/fsnotify/fsnotify"
 )
 
-type FuncMap template.FuncMap
+type FuncMap map[string]interface{}
 
 type Renderer struct {
 	directory string
@@ -18,29 +22,68 @@ type Renderer struct {
 	// When watching the template directory, we want to parse and execute
 	// in parallel, so we have to keep a clean base copy of the template
 	// for parsing and the regular template which is used for executing.
-	base      *template.Template
-	templates *template.Template
+	textbase      *texttemplate.Template
+	texttemplates *texttemplate.Template
+
+	htmlbase      *htmltemplate.Template
+	htmltemplates *htmltemplate.Template
 }
 
 func (r *Renderer) Render(w io.Writer, name string, data interface{}) error {
-	return r.templates.ExecuteTemplate(w, name, data)
+	if isText(name) {
+		return r.texttemplates.ExecuteTemplate(w, name, data)
+	} else {
+		return r.htmltemplates.ExecuteTemplate(w, name, data)
+	}
 }
 
-// NewRenderer parses the templates from directory.
-// Subdirectories are not supported at the moment,
-// because the template package identifies templates
-// by filename alone.
+// NewRenderer parses the templates from the given directory.
+//
+// Subdirectories are not supported at the moment, because the template
+// package identifies templates by filename alone.
+//
+// The text/template package is used for files ending in .text.ext.
+// All other files are handled by the html/template package.
 func NewRenderer(directory string) *Renderer {
 	return NewRendererWithFunctions(directory, nil)
 }
 
 func NewRendererWithFunctions(directory string, functions FuncMap) *Renderer {
+	textfiles, htmlfiles, err := readFiles(directory)
+	if err != nil {
+		log.Println("[renderer] error: failed to read template directory:", err)
+	}
+
 	r := new(Renderer)
 	r.directory = directory
-	pattern := strings.TrimRight(directory, "/") + "/*"
-	r.base = template.Must(template.New("").Funcs(template.FuncMap(functions)).ParseGlob(pattern))
-	r.templates = template.Must(r.base.Clone())
+
+	r.textbase = texttemplate.Must(texttemplate.New("").Funcs(texttemplate.FuncMap(functions)).ParseFiles(textfiles...))
+	r.texttemplates = texttemplate.Must(r.textbase.Clone())
+
+	r.htmlbase = htmltemplate.Must(htmltemplate.New("").Funcs(htmltemplate.FuncMap(functions)).ParseFiles(htmlfiles...))
+	r.htmltemplates = htmltemplate.Must(r.htmlbase.Clone())
 	return r
+}
+
+func readFiles(directory string) (textfiles []string, htmlfiles []string, err error) {
+	infos, err := ioutil.ReadDir(directory)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, info := range infos {
+		if info.IsDir() {
+			continue
+		}
+		filename := filepath.Join(directory, info.Name())
+		if isText(filename) {
+			textfiles = append(textfiles, filename)
+		} else {
+			htmlfiles = append(htmlfiles, filename)
+		}
+	}
+
+	return
 }
 
 func (r *Renderer) WatchTemplateDirectory() {
@@ -61,18 +104,61 @@ func (r *Renderer) WatchTemplateDirectory() {
 			select {
 			case event := <-watcher.Events:
 				if event.Op&fsnotify.Write != 0 {
-					updated, err := r.base.ParseFiles(event.Name)
-					if err != nil {
-						log.Printf("[renderer] warning: failed to reload template file (%s): %v", event.Name, err)
+					var err error
+
+					if isText(event.Name) {
+						var updated *texttemplate.Template
+						updated, err = r.textbase.ParseFiles(event.Name)
+						if err == nil {
+							r.textbase = updated
+							r.texttemplates = texttemplate.Must(updated.Clone())
+						}
 					} else {
-						r.base = updated
-						r.templates = template.Must(updated.Clone())
+						var updated *htmltemplate.Template
+						updated, err = r.htmlbase.ParseFiles(event.Name)
+						if err == nil {
+							r.htmlbase = updated
+							r.htmltemplates = htmltemplate.Must(updated.Clone())
+						}
+					}
+
+					if err != nil {
+						log.Printf("[renderer] warning: failed to reload template file: %s: %v", event.Name, err)
+					} else {
 						log.Println("[renderer] info: updated template file:", event.Name)
 					}
 				}
+
 			case err := <-watcher.Errors:
 				log.Println("[renderer] warning: template watcher error:", err)
 			}
 		}
 	}()
+}
+
+func isText(filename string) bool {
+	return ext2(filename) == ".text"
+}
+
+// ext2 returns the paths second extension.
+//
+// The second extension is the one between the second to last and the last dot
+// in the final elementq of the path. It contains a dot on the left, but not
+// on the right. It is empty if the final element does not contain two dots.
+//
+// Examples:
+// "filename.a.b.c" => ".b"
+// "filename.ext" => ""
+func ext2(path string) string {
+	for i := len(path) - 1; i >= 0 && !os.IsPathSeparator(path[i]); i-- {
+		if path[i] == '.' {
+			for j := i - 1; j >= 0 && !os.IsPathSeparator(path[j]); j-- {
+				if path[j] == '.' {
+					return path[j:i]
+				}
+			}
+		}
+	}
+
+	return ""
 }
