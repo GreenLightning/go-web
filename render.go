@@ -13,6 +13,11 @@ type FuncMap template.FuncMap
 
 type Renderer struct {
 	directory string
+
+	// @Note: The template gets locked during the first call to execute.
+	// When watching the template directory, we want to parse and execute
+	// in parallel, so we have to keep a clean base copy of the template
+	// for parsing and the regular template which is used for executing.
 	base      *template.Template
 	templates *template.Template
 }
