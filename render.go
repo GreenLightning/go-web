@@ -12,6 +12,7 @@ import (
 type FuncMap template.FuncMap
 
 type Renderer struct {
+	directory string
 	base      *template.Template
 	templates *template.Template
 }
@@ -20,30 +21,31 @@ func (r *Renderer) Render(w io.Writer, name string, data interface{}) error {
 	return r.templates.ExecuteTemplate(w, name, data)
 }
 
-func NewRenderer(directory string, debug bool) *Renderer {
-	return NewRendererWithFunctions(directory, debug, nil)
+// NewRenderer parses the templates from directory.
+// Subdirectories are not supported at the moment,
+// because the template package identifies templates
+// by filename alone.
+func NewRenderer(directory string) *Renderer {
+	return NewRendererWithFunctions(directory, nil)
 }
 
-func NewRendererWithFunctions(directory string, debug bool, functions FuncMap) *Renderer {
-	directory = strings.TrimRight(directory, "/")
-	pattern := directory + "/*"
+func NewRendererWithFunctions(directory string, functions FuncMap) *Renderer {
 	r := new(Renderer)
+	r.directory = directory
+	pattern := strings.TrimRight(directory, "/") + "/*"
 	r.base = template.Must(template.New("").Funcs(template.FuncMap(functions)).ParseGlob(pattern))
 	r.templates = template.Must(r.base.Clone())
-	if debug {
-		r.watchTemplateDirectory(directory)
-	}
 	return r
 }
 
-func (r *Renderer) watchTemplateDirectory(directory string) {
+func (r *Renderer) WatchTemplateDirectory() {
 	watcher, err := fsnotify.NewWatcher() // @Leak: Close watcher.
 	if err != nil {
 		log.Println("[web][render][warning] failed to create template watcher:", err)
 		return
 	}
 
-	err = watcher.Add(directory)
+	err = watcher.Add(r.directory)
 	if err != nil {
 		log.Println("[web][render][warning] failed to watch template directory:", err)
 		return
