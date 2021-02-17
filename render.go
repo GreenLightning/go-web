@@ -57,10 +57,16 @@ func NewRendererWithFunctions(directory string, functions FuncMap) *Renderer {
 	r := new(Renderer)
 	r.directory = directory
 
-	r.textbase = texttemplate.Must(texttemplate.New("").Funcs(texttemplate.FuncMap(functions)).ParseFiles(textfiles...))
+	r.textbase = texttemplate.New("").Funcs(texttemplate.FuncMap(functions))
+	if len(textfiles) != 0 {
+		r.textbase = texttemplate.Must(r.textbase.ParseFiles(textfiles...))
+	}
 	r.texttemplates = texttemplate.Must(r.textbase.Clone())
 
-	r.htmlbase = htmltemplate.Must(htmltemplate.New("").Funcs(htmltemplate.FuncMap(functions)).ParseFiles(htmlfiles...))
+	r.htmlbase = htmltemplate.New("").Funcs(htmltemplate.FuncMap(functions))
+	if len(htmlfiles) != 0 {
+		r.htmlbase = htmltemplate.Must(r.htmlbase.ParseFiles(htmlfiles...))
+	}
 	r.htmltemplates = htmltemplate.Must(r.htmlbase.Clone())
 	return r
 }
