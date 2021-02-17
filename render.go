@@ -2,10 +2,10 @@ package web
 
 import (
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"log"
 	"os"
-	"path/filepath"
+	"path"
 
 	htmltemplate "html/template"
 	texttemplate "text/template"
@@ -37,42 +37,62 @@ func (r *Renderer) Render(w io.Writer, name string, data interface{}) error {
 	}
 }
 
-// NewRenderer parses the templates from the given directory.
+type RendererOptions struct {
+	// Fsys specifies the file system to use.
+	// If Fsys is nil, os.DirFS(".") is used.
+	Fsys fs.FS
+
+	// Directory to search for templates.
+	// If empty, "." is used.
+	Directory string
+
+	// Functions is a map of functions to pass to the templates.
+	// Can be nil, if there are no functions.
+	Functions FuncMap
+}
+
+// NewRenderer parses the templates from the given file system and directory.
 //
 // Subdirectories are not supported at the moment, because the template
 // package identifies templates by filename alone.
 //
 // The text/template package is used for files ending in .text.ext.
 // All other files are handled by the html/template package.
-func NewRenderer(directory string) *Renderer {
-	return NewRendererWithFunctions(directory, nil)
-}
+func NewRenderer(options RendererOptions) *Renderer {
+	r := new(Renderer)
 
-func NewRendererWithFunctions(directory string, functions FuncMap) *Renderer {
-	textfiles, htmlfiles, err := readFiles(directory)
-	if err != nil {
-		log.Println("[renderer] error: failed to read template directory:", err)
+	if options.Directory == "" {
+		options.Directory = "."
 	}
 
-	r := new(Renderer)
-	r.directory = directory
+	if options.Fsys == nil {
+		options.Fsys = os.DirFS(".")
+		r.directory = options.Directory
+	}
 
-	r.textbase = texttemplate.New("").Funcs(texttemplate.FuncMap(functions))
+	textfiles, htmlfiles, err := readFiles(options.Fsys, options.Directory)
+	if err != nil {
+		log.Println("[renderer] error: failed to read template directory:", err)
+		// Do not return. The code below creates empty templates.
+	}
+
+	r.textbase = texttemplate.New("").Funcs(texttemplate.FuncMap(options.Functions))
 	if len(textfiles) != 0 {
-		r.textbase = texttemplate.Must(r.textbase.ParseFiles(textfiles...))
+		r.textbase = texttemplate.Must(r.textbase.ParseFS(options.Fsys, textfiles...))
 	}
 	r.texttemplates = texttemplate.Must(r.textbase.Clone())
 
-	r.htmlbase = htmltemplate.New("").Funcs(htmltemplate.FuncMap(functions))
+	r.htmlbase = htmltemplate.New("").Funcs(htmltemplate.FuncMap(options.Functions))
 	if len(htmlfiles) != 0 {
-		r.htmlbase = htmltemplate.Must(r.htmlbase.ParseFiles(htmlfiles...))
+		r.htmlbase = htmltemplate.Must(r.htmlbase.ParseFS(options.Fsys, htmlfiles...))
 	}
 	r.htmltemplates = htmltemplate.Must(r.htmlbase.Clone())
+
 	return r
 }
 
-func readFiles(directory string) (textfiles []string, htmlfiles []string, err error) {
-	infos, err := ioutil.ReadDir(directory)
+func readFiles(fsys fs.FS, directory string) (textfiles []string, htmlfiles []string, err error) {
+	infos, err := fs.ReadDir(fsys, directory)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -81,7 +101,7 @@ func readFiles(directory string) (textfiles []string, htmlfiles []string, err er
 		if info.IsDir() {
 			continue
 		}
-		filename := filepath.Join(directory, info.Name())
+		filename := path.Join(directory, info.Name())
 		if isText(filename) {
 			textfiles = append(textfiles, filename)
 		} else {
@@ -92,7 +112,12 @@ func readFiles(directory string) (textfiles []string, htmlfiles []string, err er
 	return
 }
 
+// Only works if the renderer has been created with options.Fsys == nil.
 func (r *Renderer) WatchTemplateDirectory() {
+	if r.directory == "" {
+		return
+	}
+
 	watcher, err := fsnotify.NewWatcher() // @Leak: Close watcher.
 	if err != nil {
 		log.Println("[renderer] warning: failed to create template watcher:", err)
