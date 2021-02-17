@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -103,6 +104,11 @@ func (store *FileStore) SendFile(w http.ResponseWriter, r *http.Request, filenam
 
 	// ETag is handled by ServeContent.
 	w.Header().Set("ETag", tagInfo.Tag)
+
+	// When using Apache as reverse proxy, it can add a -gzip suffix to the etag.
+	if existing := r.Header.Get("If-None-Match"); strings.HasSuffix(existing, `-gzip"`) {
+		r.Header.Set("If-None-Match", strings.TrimSuffix(existing, `-gzip"`)+`"`)
+	}
 
 	http.ServeContent(w, r, info.Name(), info.ModTime(), reader)
 	return nil
