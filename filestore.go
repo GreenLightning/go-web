@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -16,8 +17,9 @@ import (
 // Additionally, it computes and caches ETags based on the file contents.
 // ETags are cached by filename and updated when the modification time changes.
 type FileStore struct {
-	fsys  fs.FS
-	etags map[string]etagInfo
+	fsys       fs.FS
+	etagsMutex sync.Mutex
+	etags      map[string]etagInfo
 }
 
 type etagInfo struct {
@@ -73,7 +75,10 @@ func (store *FileStore) SendFile(w http.ResponseWriter, r *http.Request, filenam
 		reader = bytes.NewReader(contents)
 	}
 
+	store.etagsMutex.Lock()
 	tagInfo, ok := store.etags[filename]
+	store.etagsMutex.Unlock()
+
 	if !ok || !tagInfo.ModTime.Equal(info.ModTime()) {
 		hasher := sha1.New()
 		_, err := io.Copy(hasher, reader)
@@ -90,7 +95,10 @@ func (store *FileStore) SendFile(w http.ResponseWriter, r *http.Request, filenam
 		// See https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/ETag
 		tagInfo.ModTime = info.ModTime()
 		tagInfo.Tag = fmt.Sprintf(`"%s"`, hex.EncodeToString(hasher.Sum(nil)))
+
+		store.etagsMutex.Lock()
 		store.etags[filename] = tagInfo
+		store.etagsMutex.Unlock()
 	}
 
 	// ETag is handled by ServeContent.
